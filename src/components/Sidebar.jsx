@@ -22,10 +22,10 @@ const Sidebar = () => {
             <div className="sidebar-logo" style={{ marginBottom: '3rem', padding: '1rem', flexDirection: 'column', alignItems: 'flex-start', gap: '0.4rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <Shield size={24} className="text-primary" />
-                    <span style={{ fontSize: '1.2rem', fontWeight: 900, letterSpacing: '0.1em' }}>VECTOR</span>
+                    <span style={{ fontSize: '1.2rem', fontWeight: 900, letterSpacing: '0.1em', fontFamily: "'Inter', sans-serif" }}>VECTOR</span>
                 </div>
-                <span className="mono" style={{ fontSize: '0.45rem', color: 'var(--text-dim)', letterSpacing: '0.08em', lineHeight: 1.3, paddingLeft: '0.1rem' }}>
-                    Velocity Engine for Critical<br />Transaction & Observation Risk
+                <span className="mono" style={{ fontSize: '0.72rem', color: 'var(--text-dim)', letterSpacing: '0.06em', lineHeight: 1.5, paddingLeft: '0.1rem' }}>
+                    Velocity Engine for Critical<br />Transaction &amp; Observation Risk
                 </span>
             </div>
 

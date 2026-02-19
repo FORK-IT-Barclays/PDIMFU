@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@200;300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
   /* Institutional Palette - Muted & Purposeful */
@@ -28,9 +28,9 @@
   --border: rgba(255, 255, 255, 0.06);
   --border-focus: rgba(56, 189, 248, 0.4);
 
-  font-family: 'Inter', sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  font-family: 'Montserrat', sans-serif;
+  line-height: 1.6;
+  font-weight: 200;
 
   color-scheme: dark;
   color: var(--text-main);
