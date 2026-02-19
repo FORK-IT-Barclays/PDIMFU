@@ -1,42 +1,88 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { Info, Activity, ShieldCheck, AlertTriangle, TrendingUp, TrendingDown, Users, DollarSign, Target, Clock, Zap, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { portfolioStats, mockCustomers, batchProcessor } from '../data/mockData';
+import { Info, ShieldCheck, AlertTriangle, TrendingUp, Users, DollarSign, Target, ArrowUpRight, ArrowDownRight, RefreshCcw } from 'lucide-react';
+import { getAccounts, getPortfolioStats, getLatestBatch } from '../services/api';
+import { portfolioStats as fallbackStats, batchProcessor as fallbackBatch } from '../data/mockData';
 import '../App.css';
 
-const TIER_COLORS = {
-    'Tier 3': 'var(--tier-3)',
-    'Tier 2': 'var(--tier-2)',
-    'Tier 1': 'var(--tier-1)',
+// ─── helpers ─────────────────────────────────────────────────────────────────
+const generateTrend = (points, start, volatility) => {
+    let t = [start];
+    for (let i = 1; i < points; i++) {
+        let v = t[i - 1] + (Math.random() - 0.5) * volatility;
+        t.push(Math.max(10, Math.min(95, v)));
+    }
+    return t;
 };
+
+const signalNames = { s1: 'PAY_DRIFT', s2: 'LIQUIDITY', s3: 'EXHAUSTION', s4: 'SPEND_VEL', s5: 'APP_DECAY', s6: 'EXTERNAL', s7: 'CASH_SHIFT', s8: 'FAILURE' };
 
 const Dashboard = () => {
     const [timeRange, setTimeRange] = useState(30);
 
+    // ── Live data state ──────────────────────────────────────────────
+    const [accounts, setAccounts] = useState([]);
+    const [portfolioApi, setPortfolioApi] = useState(null);
+    const [latestBatch, setLatestBatch] = useState(null);
+    const [apiLoading, setApiLoading] = useState(true);
+    const [apiError, setApiError] = useState(false);
+
+    const fetchAll = useCallback(async () => {
+        setApiLoading(true);
+        try {
+            const [acctRes, statsRes, batchRes] = await Promise.all([
+                getAccounts({ limit: 100 }),
+                getPortfolioStats(),
+                getLatestBatch(),
+            ]);
+            setAccounts(acctRes.data || []);
+            setPortfolioApi(statsRes.data || null);
+            setLatestBatch(batchRes.data || null);
+            setApiError(false);
+        } catch {
+            setApiError(true);
+        } finally {
+            setApiLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchAll(); }, [fetchAll]);
+
+    // ── Derived stats (use API data when available, fallback otherwise) ──
+    const customers = accounts.length > 0 ? accounts : [];
+    const t3Count = portfolioApi?.tiers?.['Tier 3']?.count ?? fallbackStats.tierDistribution.tier3;
+    const t2Count = portfolioApi?.tiers?.['Tier 2']?.count ?? fallbackStats.tierDistribution.tier2;
+    const t1Count = portfolioApi?.tiers?.['Tier 1']?.count ?? fallbackStats.tierDistribution.tier1;
+    const avgRisk = portfolioApi?.velocityStats?.avgRisk != null
+        ? (portfolioApi.velocityStats.avgRisk * 100).toFixed(1)
+        : '—';
+    const highVelocityCount = portfolioApi?.velocityStats?.highVelocity ?? customers.filter(c => c.velocity > 0.08).length;
+    const recoveringCount = portfolioApi?.velocityStats?.recovering ?? 0;
+    const total = portfolioApi?.total ?? customers.length;
+
+    const batchId = latestBatch?.batchId ?? fallbackBatch.lastBatchId;
+    const batchAccounts = latestBatch?.accountsProcessed ?? fallbackBatch.accountsProcessed;
+    const batchStatus = latestBatch?.status ?? fallbackBatch.status;
+    const batchNext = latestBatch?.nextScheduledRun
+        ? new Date(latestBatch.nextScheduledRun).toISOString().replace('T', ' ').slice(0, 16)
+        : fallbackBatch.nextScheduledRun?.replace('T', ' ').slice(0, 16);
+
+    const diagnosisDistribution = portfolioApi?.diagnosisDistribution ?? fallbackStats.diagnosisDistribution;
+
+    // ── Chart data ─────────────────────────────────────────────────────
+    const fleetHistory = useMemo(() => generateTrend(180, 45, 2), []);
     const chartData = useMemo(() => {
-        const data = portfolioStats.fleetHistory.slice(-timeRange);
+        const data = fleetHistory.slice(-timeRange);
         return data.map((val, i) => ({
             index: i,
             risk: val.toFixed(1),
-            date: new Date(Date.now() - (timeRange - i) * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN', {
-                day: 'numeric', month: 'short'
-            })
+            date: new Date(Date.now() - (timeRange - i) * 86400000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
         }));
-    }, [timeRange]);
-
-    // Compute meaningful stats from mock data
-    const t3Count = mockCustomers.filter(c => c.tier === 'Tier 3').length;
-    const t2Count = mockCustomers.filter(c => c.tier === 'Tier 2').length;
-    const t1Count = mockCustomers.filter(c => c.tier === 'Tier 1').length;
-
-    const avgRisk = (mockCustomers.reduce((s, c) => s + c.risk, 0) / mockCustomers.length * 100).toFixed(1);
-    const highVelocityCount = mockCustomers.filter(c => c.velocity > 0.08).length;
-    const acceleratingCount = mockCustomers.filter(c => c.accel > 0.005).length;
-    const recoveringCount = mockCustomers.filter(c => c.velocity < 0 && c.accel < 0).length;
+    }, [timeRange, fleetHistory]);
 
     const pieData = [
         { name: 'Tier 3 (Critical)', value: t3Count, color: '#f43f5e' },
@@ -44,7 +90,7 @@ const Dashboard = () => {
         { name: 'Tier 1 (Watch)', value: t1Count, color: '#10b981' },
     ];
 
-    const diagnosisData = portfolioStats.diagnosisDistribution.map(d => ({
+    const diagnosisData = diagnosisDistribution.map(d => ({
         name: d.diagnosis.length > 14 ? d.diagnosis.substring(0, 14) + '…' : d.diagnosis,
         fullName: d.diagnosis,
         count: d.count,
@@ -53,31 +99,58 @@ const Dashboard = () => {
                 : '#10b981',
     }));
 
-    // Recent signal events (derived from data)
+    // ── Signal event log (derived from top accounts) ────────────────────
     const signalEvents = useMemo(() => {
-        const events = [];
-        mockCustomers.slice(0, 8).forEach(c => {
-            const maxSignal = Object.entries(c.signals).reduce((max, [k, v]) => v > max.v ? { k, v } : max, { k: 's1', v: 0 });
-            const signalNames = { s1: 'PAY_DRIFT', s2: 'LIQUIDITY', s3: 'EXHAUSTION', s4: 'SPEND_VEL', s5: 'APP_DECAY', s6: 'EXTERNAL', s7: 'CASH_SHIFT', s8: 'FAILURE' };
-            events.push({
-                time: `${String(23 - events.length).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}`,
+        const source = customers.slice(0, 8);
+        return source.map((c, idx) => {
+            const sigs = c.signals instanceof Map
+                ? Object.fromEntries(c.signals)
+                : (typeof c.signals === 'object' && c.signals !== null) ? c.signals : {};
+            const maxSignal = Object.entries(sigs).reduce(
+                (max, [k, v]) => v > max.v ? { k, v } : max,
+                { k: 's1', v: 0 }
+            );
+            return {
+                time: `${String(23 - idx).padStart(2, '0')}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}:00`,
                 name: c.name,
-                signal: `${maxSignal.k.toUpperCase()}: ${signalNames[maxSignal.k]}`,
-                value: maxSignal.v.toFixed(2),
+                signal: `${maxSignal.k.toUpperCase()}: ${signalNames[maxSignal.k] ?? maxSignal.k}`,
+                value: Number(maxSignal.v).toFixed(2),
                 color: maxSignal.v > 0.7 ? 'var(--tier-3)' : maxSignal.v > 0.5 ? 'var(--tier-2)' : 'var(--tier-1)',
-            });
+            };
         });
-        return events;
-    }, []);
+    }, [customers]);
+
+    // ── Loading skeleton ─────────────────────────────────────────────
+    if (apiLoading) {
+        return (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="page-container">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '4rem', alignItems: 'center' }}>
+                    <RefreshCcw size={24} className="text-primary" style={{ animation: 'spin 1s linear infinite' }} />
+                    <span className="mono text-dim" style={{ fontSize: '0.75rem' }}>LOADING_PORTFOLIO_DATA...</span>
+                </div>
+                <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+            </motion.div>
+        );
+    }
 
     return (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="page-container">
             <header className="page-header" style={{ marginBottom: '2rem' }}>
                 <div>
                     <h1>Portfolio Overwatch</h1>
-                    <p className="mono text-dim" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>LOAN_ACCOUNTS_MONITORED // BATCH_PROCESSED // ADMIN_VIEW</p>
+                    <p className="mono text-dim" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>
+                        LOAN_ACCOUNTS_MONITORED // BATCH_PROCESSED // ADMIN_VIEW
+                    </p>
                 </div>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    {apiError && (
+                        <div className="mono" style={{ fontSize: '0.6rem', padding: '0.4rem 0.8rem', background: 'rgba(244,63,94,0.1)', color: 'var(--tier-3)', borderRadius: '4px', border: '1px solid rgba(244,63,94,0.2)' }}>
+                            API_FALLBACK: MOCK_DATA
+                        </div>
+                    )}
+                    <button onClick={fetchAll} className="mono" style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)', padding: '0.4rem 0.8rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <RefreshCcw size={10} /> REFRESH
+                    </button>
                     <div className="mono" style={{ fontSize: '0.65rem', padding: '0.4rem 0.8rem', background: 'var(--tier-1-soft)', color: 'var(--tier-1)', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                         SYSTEM_HEALTH: OPTIMAL
                     </div>
@@ -87,11 +160,11 @@ const Dashboard = () => {
             {/* KPI Cards Row */}
             <div className="stats-grid" style={{ marginBottom: '2rem', gridTemplateColumns: 'repeat(5, 1fr)' }}>
                 {[
-                    { label: 'Monitored Accounts', value: portfolioStats.totalLoanAccounts?.toLocaleString() ?? '—', delta: `Batch ${batchProcessor.lastBatchId}`, up: false, desc: 'Total loan book', icon: Users },
-                    { label: 'Total Exposure', value: portfolioStats.totalExposure, delta: '+2.4%', up: true, desc: 'Outstanding principal', icon: DollarSign },
-                    { label: 'At-Risk Exposure', value: portfolioStats.atRiskExposure, delta: `${t3Count} T3 accounts`, up: true, desc: 'T3 segment exposure', icon: AlertTriangle },
-                    { label: 'Avg Portfolio Risk', value: `${avgRisk}%`, delta: portfolioStats.portfolioVelocity, up: parseFloat(portfolioStats.portfolioVelocity) > 0, desc: 'Weighted kinetic avg', icon: Target },
-                    { label: 'Collection Efficiency', value: portfolioStats.collectionEfficiency.current, delta: portfolioStats.collectionEfficiency.delta, up: false, desc: 'vs prev period', icon: TrendingUp },
+                    { label: 'Monitored Accounts', value: total.toLocaleString(), delta: `Batch ${batchId}`, up: false, desc: 'Total loan book', icon: Users },
+                    { label: 'Total Exposure', value: fallbackStats.totalExposure, delta: '+2.4%', up: true, desc: 'Outstanding principal', icon: DollarSign },
+                    { label: 'At-Risk Exposure', value: fallbackStats.atRiskExposure, delta: `${t3Count} T3 accounts`, up: true, desc: 'T3 segment exposure', icon: AlertTriangle },
+                    { label: 'Avg Portfolio Risk', value: `${avgRisk}%`, delta: `+${portfolioApi?.velocityStats?.avgVelocity?.toFixed(4) ?? '0.0000'}`, up: true, desc: 'Weighted kinetic avg', icon: Target },
+                    { label: 'Collection Efficiency', value: fallbackStats.collectionEfficiency.current, delta: fallbackStats.collectionEfficiency.delta, up: false, desc: 'vs prev period', icon: TrendingUp },
                 ].map((stat, i) => (
                     <div key={i} className="technical-card" style={{ padding: '1.25rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -112,8 +185,8 @@ const Dashboard = () => {
             {/* Secondary KPI Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem', marginBottom: '2rem' }}>
                 {[
-                    { label: 'Active Interventions', value: portfolioStats.activeInterventions, color: 'var(--primary)' },
-                    { label: 'Intervention Success Rate', value: `${portfolioStats.interventionSuccessRate}%`, color: 'var(--tier-1)' },
+                    { label: 'Active Interventions', value: fallbackStats.activeInterventions, color: 'var(--primary)' },
+                    { label: 'Intervention Success Rate', value: `${fallbackStats.interventionSuccessRate}%`, color: 'var(--tier-1)' },
                     { label: 'High-Velocity Accounts', value: highVelocityCount, color: 'var(--tier-3)' },
                     { label: 'Recovering Accounts', value: recoveringCount, color: 'var(--tier-1)' },
                 ].map((m, i) => (
@@ -132,16 +205,8 @@ const Dashboard = () => {
                             <div className="sidebar-section" style={{ margin: 0, padding: 0 }}>Loan Portfolio Kinetic Trajectory</div>
                             <div style={{ display: 'flex', gap: '0.25rem' }}>
                                 {[7, 30, 90].map(r => (
-                                    <button
-                                        key={r}
-                                        onClick={() => setTimeRange(r)}
-                                        className={`mono ${timeRange === r ? 'active' : ''}`}
-                                        style={{
-                                            background: timeRange === r ? 'var(--primary)' : 'transparent',
-                                            border: '1px solid var(--border)', color: timeRange === r ? 'black' : 'var(--text-dim)',
-                                            padding: '0.2rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 800
-                                        }}
-                                    >
+                                    <button key={r} onClick={() => setTimeRange(r)} className={`mono ${timeRange === r ? 'active' : ''}`}
+                                        style={{ background: timeRange === r ? 'var(--primary)' : 'transparent', border: '1px solid var(--border)', color: timeRange === r ? 'black' : 'var(--text-dim)', padding: '0.2rem 0.6rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 800 }}>
                                         {r}D
                                     </button>
                                 ))}
@@ -168,28 +233,21 @@ const Dashboard = () => {
 
                     {/* Two-column charts */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                        {/* Tier Distribution Pie */}
                         <div className="technical-card">
                             <div className="sidebar-section" style={{ margin: 0, padding: 0, marginBottom: '1rem' }}>Tier Distribution</div>
                             <div style={{ height: 200 }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={3} strokeWidth={0}>
-                                            {pieData.map((entry, i) => (
-                                                <Cell key={i} fill={entry.color} />
-                                            ))}
+                                            {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                                         </Pie>
                                         <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '10px' }} />
-                                        <Legend
-                                            formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem' }}>{value}</span>}
-                                            iconSize={8}
-                                        />
+                                        <Legend formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '0.6rem' }}>{value}</span>} iconSize={8} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
                         </div>
 
-                        {/* Diagnosis Distribution Bar */}
                         <div className="technical-card">
                             <div className="sidebar-section" style={{ margin: 0, padding: 0, marginBottom: '1rem' }}>Diagnosis Breakdown</div>
                             <div style={{ height: 200 }}>
@@ -198,14 +256,9 @@ const Dashboard = () => {
                                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" horizontal={false} />
                                         <XAxis type="number" hide />
                                         <YAxis type="category" dataKey="name" width={90} tick={{ fill: '#94a3b8', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                        <Tooltip
-                                            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '10px' }}
-                                            formatter={(value, name, props) => [value, props.payload.fullName]}
-                                        />
+                                        <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '10px' }} formatter={(value, name, props) => [value, props.payload.fullName]} />
                                         <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                                            {diagnosisData.map((entry, i) => (
-                                                <Cell key={i} fill={entry.fill} fillOpacity={0.8} />
-                                            ))}
+                                            {diagnosisData.map((entry, i) => <Cell key={i} fill={entry.fill} fillOpacity={0.8} />)}
                                         </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -213,12 +266,12 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Daily Trends Chart */}
+                    {/* Daily Trends */}
                     <div className="technical-card">
                         <div className="sidebar-section" style={{ margin: 0, padding: 0, marginBottom: '1rem' }}>Weekly Operations Trend</div>
                         <div style={{ height: 200 }}>
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={portfolioStats.dailyTrends} barGap={2}>
+                                <BarChart data={fallbackStats.dailyTrends} barGap={2}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.02)" vertical={false} />
                                     <XAxis dataKey="day" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
                                     <YAxis hide />
@@ -226,10 +279,7 @@ const Dashboard = () => {
                                     <Bar dataKey="newT3" name="New T3 Escalations" fill="#f43f5e" radius={[3, 3, 0, 0]} barSize={14} />
                                     <Bar dataKey="resolved" name="Cases Resolved" fill="#10b981" radius={[3, 3, 0, 0]} barSize={14} />
                                     <Bar dataKey="interventions" name="Interventions Fired" fill="#38bdf8" radius={[3, 3, 0, 0]} barSize={14} opacity={0.5} />
-                                    <Legend
-                                        formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '0.55rem' }}>{value}</span>}
-                                        iconSize={8}
-                                    />
+                                    <Legend formatter={(value) => <span style={{ color: 'var(--text-muted)', fontSize: '0.55rem' }}>{value}</span>} iconSize={8} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -272,9 +322,8 @@ const Dashboard = () => {
                         </div>
                         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
                             Loan portfolio is currently <span className="text-green" style={{ fontWeight: 800 }}>STABLE</span>.
-                            Kinetic growth is localized in the Tier 3 segment, which represents <span style={{ color: 'white' }}>{((t3Count / mockCustomers.length) * 100).toFixed(1)}%</span> of monitored accounts.
-                            {acceleratingCount > 0 && <> <span className="text-red" style={{ fontWeight: 700 }}>{acceleratingCount} accounts</span> showing accelerating risk.</>}
-                            {recoveringCount > 0 && <> <span className="text-green" style={{ fontWeight: 700 }}>{recoveringCount} accounts</span> in recovery trajectory.</>}
+                            Kinetic growth is localized in the Tier 3 segment, representing <span style={{ color: 'white' }}>{t3Count + t2Count + t1Count > 0 ? ((t3Count / (t3Count + t2Count + t1Count)) * 100).toFixed(1) : '0'}%</span> of monitored accounts.
+                            {highVelocityCount > 0 && <> <span className="text-red" style={{ fontWeight: 700 }}>{highVelocityCount} accounts</span> showing high velocity risk.</>}
                         </p>
                     </div>
 
@@ -283,9 +332,9 @@ const Dashboard = () => {
                         <div className="sidebar-section" style={{ padding: 0, marginBottom: '1rem' }}>NPA Projection</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                             {[
-                                { label: 'Current T3 (Pre-NPA)', val: portfolioStats.npaProjection.current, color: 'var(--tier-3)' },
-                                { label: 'Est. 30-Day NPA', val: portfolioStats.npaProjection.estimated30Days, color: 'var(--tier-2)' },
-                                { label: 'Est. 90-Day NPA', val: portfolioStats.npaProjection.estimated90Days, color: 'var(--text-muted)' },
+                                { label: 'Current T3 (Pre-NPA)', val: fallbackStats.npaProjection.current, color: 'var(--tier-3)' },
+                                { label: 'Est. 30-Day NPA', val: fallbackStats.npaProjection.estimated30Days, color: 'var(--tier-2)' },
+                                { label: 'Est. 90-Day NPA', val: fallbackStats.npaProjection.estimated90Days, color: 'var(--text-muted)' },
                             ].map((p, i) => (
                                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span className="mono text-dim" style={{ fontSize: '0.6rem' }}>{p.label}</span>
@@ -300,9 +349,9 @@ const Dashboard = () => {
                         <div className="sidebar-section" style={{ padding: 0, marginBottom: '1rem' }}>Recovery Metrics</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                             {[
-                                { label: 'Total Recovered', val: portfolioStats.recoveryMetrics.totalRecovered },
-                                { label: 'Avg Recovery Time', val: portfolioStats.recoveryMetrics.avgRecoveryTime },
-                                { label: 'Recovery Rate', val: portfolioStats.recoveryMetrics.recoveryRate },
+                                { label: 'Total Recovered', val: fallbackStats.recoveryMetrics.totalRecovered },
+                                { label: 'Avg Recovery Time', val: fallbackStats.recoveryMetrics.avgRecoveryTime },
+                                { label: 'Recovery Rate', val: fallbackStats.recoveryMetrics.recoveryRate },
                             ].map((p, i) => (
                                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span className="mono text-dim" style={{ fontSize: '0.6rem' }}>{p.label}</span>
@@ -312,15 +361,15 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Batch Processor */}
+                    {/* Batch Processor — live from MongoDB */}
                     <div className="technical-card" style={{ borderColor: 'var(--primary-glow)' }}>
                         <div className="sidebar-section" style={{ padding: 0, marginBottom: '1rem' }}>Batch Processor</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             {[
-                                { label: 'Last batch', val: batchProcessor.lastBatchId, color: 'var(--primary)' },
-                                { label: 'Accounts processed', val: batchProcessor.accountsProcessed?.toLocaleString() },
-                                { label: 'Status', val: batchProcessor.status, color: 'var(--tier-1)' },
-                                { label: 'Next run', val: batchProcessor.nextScheduledRun?.replace('T', ' ').slice(0, 16) },
+                                { label: 'Last batch', val: batchId, color: 'var(--primary)' },
+                                { label: 'Accounts processed', val: batchAccounts?.toLocaleString() },
+                                { label: 'Status', val: batchStatus, color: 'var(--tier-1)' },
+                                { label: 'Next run', val: batchNext },
                             ].map((s, i) => (
                                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span className="mono text-dim" style={{ fontSize: '0.65rem' }}>{s.label}</span>
@@ -335,8 +384,8 @@ const Dashboard = () => {
                         <div className="sidebar-section" style={{ padding: 0, marginBottom: '1rem' }}>Operational Status</div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                             {[
-                                { label: 'Signal Engine', status: 'SYNCHRONIZED', color: 'var(--tier-1)' },
-                                { label: 'Audit Trail', status: 'ACTIVE_UID_882', color: 'var(--text-dim)' },
+                                { label: 'Signal Engine', status: apiError ? 'FALLBACK_MODE' : 'SYNCHRONIZED', color: apiError ? 'var(--tier-2)' : 'var(--tier-1)' },
+                                { label: 'Backend API', status: apiError ? 'OFFLINE' : 'CONNECTED', color: apiError ? 'var(--tier-3)' : 'var(--tier-1)' },
                                 { label: 'Latency', status: '14ms', color: 'var(--primary)' },
                                 { label: 'Model Version', status: 'KRM-v4.0.2', color: 'var(--text-dim)' },
                             ].map((s, i) => (
