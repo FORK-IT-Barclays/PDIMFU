@@ -5,7 +5,7 @@ import Dashboard from './pages/Dashboard';
 import InterventionQueue from './pages/InterventionQueue';
 import CustomerSearch from './pages/CustomerSearch';
 import FleetAnalytics from './pages/FleetAnalytics';
-import DataNucleus from './pages/DataNucleus';
+
 import TransactionLog from './pages/TransactionLog';
 import './App.css';
 
@@ -20,7 +20,7 @@ function App() {
             <Route path="/queue" element={<InterventionQueue />} />
             <Route path="/search" element={<CustomerSearch />} />
             <Route path="/fleet" element={<FleetAnalytics />} />
-            <Route path="/nucleus" element={<DataNucleus />} />
+
             <Route path="/transactions" element={<TransactionLog />} />
           </Routes>
         </main>

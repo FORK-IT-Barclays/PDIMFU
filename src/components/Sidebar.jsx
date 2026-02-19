@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
     LayoutDashboard, Search, AlertCircle,
-    Shield, BarChart3, Database, Activity, ScrollText
+    Shield, BarChart3, Activity, ScrollText
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -53,10 +53,7 @@ const Sidebar = () => {
                     <BarChart3 size={16} />
                     <span>Observatory</span>
                 </NavLink>
-                <NavLink to="/nucleus" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                    <Database size={16} />
-                    <span>Nucleus</span>
-                </NavLink>
+
             </nav>
 
             <div className="sidebar-section" style={{ marginTop: '2.5rem' }}>AUDIT_SYSTEMS</div>
